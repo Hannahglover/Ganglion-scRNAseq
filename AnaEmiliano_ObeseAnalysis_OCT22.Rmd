@@ -1,0 +1,599 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')
+library(Seurat)
+library(tidyverse)
+library(DoubletFinder)
+library(ggpubr)
+```
+
+## FUNTIONS
+```{r}
+GeneLists = list()
+GeneLists[["Neurons"]] = c("Isl1", "Sox10", "Erbb3", "Slc47a1", "Lhx6", "Lmcd1", "Ifitm2", "Id1", "Rxrg", "Itga2", "Camk2n1", "Adamts5", "Rspo3", "Zeb2", "Penk", "Piezo1", "Tubb3", "Th", "Snap25")
+GeneLists[["Glial"]] = c("Plp1", "Fabp7", "Dbi", "S100b")
+GeneLists[["Fibroblasts"]] = c("Dcn", "Lum", "Col1a1", "Pdgfra", "Cd34")
+GeneLists[["Schwann"]] = c("Plp1", "Sox10", "Mag", "Sox2", "Mbp", "Egr2")
+GeneLists[["Adipocytes"]] = c("Ptprb", "Plvap", "Mmrn2", "Ecscr")
+GeneLists[["Macrophages"]] = c("C1qb", "Lyz2", "C1qa", "Pf4", "C1qc", "Fcer1g", "Cd74", "Ctss", "Cd68", "Alox5ap")
+GeneLists[["Microglia"]] = c("Ccl3", "Apobec1", "Cxcl2")
+GeneLists[["Vascular"]] = c("Ly6c1", "Rgs5", "Acta2", "Myh11", "Vtn", "Cldn1", "Kcnj13")
+GeneLists[["BCells"]] = c("Cd79a", "Ly6d", "Cd79b", "Iglc2")
+GeneLists[["TCells"]] = c("Trbc2", "Cd3d", "Cd3d", "Skap1", "Bcl11b", "Ms4a4b", "Trbc1", "Itk")
+GeneLists[["PlasmaCells"]] = c("Tent5c", "Isg20")
+
+
+DefaultAssay(AE.combined) = "RNA"
+for(g in names(GeneLists)){
+ GeneLists[[g]] = subset(GeneLists[[g]], GeneLists[[g]] %in% row.names(AE.combined))
+}
+
+########################################################################################################################
+HGDATE = function(){
+  Get = as.character(Sys.Date())
+  Year = strsplit(Get, "-")[[1]][1]
+  Year = gsub("20", "", Year)
+  Day = strsplit(Get, "-")[[1]][3]
+  Day = gsub("^0", "", Day)
+  Month = strsplit(Get, "-")[[1]][2]
+  if(Month == "01"){M = "JAN"}else if(Month == "02"){M = "FEB"}else if(Month == "03"){M = "MAR"}else if(Month == "04"){M = "APR"}else if(Month == "05"){M = "MAY"}else if(Month == "06"){M = "JUN"}else if(Month == "07"){M = "JUL"}else if(Month == "08"){M = "AUG"}else if(Month == "09"){M = "SEP"}else if(Month == "10"){M = "OCT"}else if(Month == "11"){M = "NOV"}else if(Month == "12"){M = "DEC"}
+  NewFormat = paste(Day, M, Year, sep="")
+  return(NewFormat)
+}
+
+########################################################################################################################
+DEGs = function(Input){
+Input.markers <- FindAllMarkers(Input, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25) 
+return(Input.markers)}
+
+########################################################################################################################
+##Check population on UMAP
+CheckUMAP = function(SeuFilez){
+  if(class(CheckInput) == "data.frame"){
+CheckMeta = as.data.frame(c(rep("RoI", length(row.names(CheckInput)))))
+colnames(CheckMeta) = "Pop"
+row.names(CheckMeta) = row.names(CheckInput)
+  }else{
+    CheckMeta = as.data.frame(c(rep("RoI", length(colnames(CheckInput)))))
+colnames(CheckMeta) = "Pop"
+row.names(CheckMeta) = colnames(CheckInput)
+  }
+
+SeuFilez = AddMetaData(SeuFilez, CheckMeta, "CheckMeta")
+Idents(SeuFilez) = "CheckMeta"
+DimPlot(SeuFilez, reduction="umap")
+}
+
+
+########################################################################################################################
+GenerateMetaData = function(ListMeta){
+MetaOutput = as.data.frame(matrix(ncol = 1, nrow =0))  
+for(x in seq(1,length(ListMeta),1)){
+if(class(ListMeta[[x]]) == "data.frame"){
+Temp = as.data.frame(rep(names(ListMeta)[[x]], length(row.names(ListMeta[[x]]))))  
+colnames(Temp) = "Pop"
+row.names(Temp) = row.names(ListMeta[[x]])
+}else{
+Temp = as.data.frame(rep(names(ListMeta)[[x]], length(colnames(ListMeta[[x]]))))  
+colnames(Temp) = "Pop"
+row.names(Temp) = colnames(ListMeta[[x]]) 
+}
+MetaOutput = rbind(MetaOutput, Temp)  
+}
+return(MetaOutput)
+}
+########################################################################################################################
+StudyName = "AE_Ganglion"
+ClusterFunc_All_RNA = function(SeuFile){
+Filename = as.character(substitute(SeuFile))
+
+for(y in set.kparam){
+for(z in set.dim){
+for(v in set.res){
+DefaultAssay(SeuFile) = "integrated"
+SeuFile <- FindNeighbors(SeuFile, k.param=y, dims=1:z)
+SeuFile <- FindClusters(SeuFile, resolution = v)
+DefaultAssay(SeuFile) = "RNA"
+
+pdf(paste(StudyName, "_", Filename, "_", HGDATE(), "_res", v, "_k", y, "_dim", z, "_umapSML.pdf", sep=""), width=12, height=10)
+dimplot = DimPlot(SeuFile, reduction="umap", label=T)
+print(dimplot)
+dev.off()
+
+
+pdf(paste(StudyName, "_", Filename, "_", HGDATE(), "_res", v, "_k", y, "_dim", z, "_umapLGE.pdf", sep=""), width=25, height=25)
+dimplot = DimPlot(SeuFile, reduction="umap", label=T)
+print(dimplot)
+dev.off()
+
+
+PullLists = as.data.frame(t(as.data.frame(lapply(GeneLists, length))))
+max(PullLists$V1)
+
+
+###VLNS
+AllVlns = list()
+
+for(d in names(GeneLists)){
+Genes = GeneLists[[d]]
+StorePlots = list()
+  for(x in Genes[1]){
+            plotA <- VlnPlot(SeuFile, features = x, pt.size = 0, same.y.lims = F,)
+            plotA <- plotA + coord_flip()+ theme(axis.ticks.x= element_blank(), axis.title.y=element_blank(), axis.text.x=element_blank(), axis.title.x=element_blank(), 
+                                                 axis.ticks.y = element_blank(), legend.position = "none", plot.title = element_text(size=12))+ labs(title = d, subtitle = Genes[1])
+            StorePlots[[x]] = plotA 
+            }
+  for(x in Genes[2:length(Genes)]){
+            plotB <- VlnPlot(SeuFile, features = x, pt.size = 0, same.y.lims = F,)
+            plotB <- plotB + coord_flip()+ theme(axis.ticks.x= element_blank(), axis.title.y=element_blank(), axis.text.x=element_blank(), axis.title.x=element_blank(), 
+                      axis.ticks.y = element_blank(), legend.position = "none", axis.text.y = element_blank(), plot.title = element_text(size=12))
+           StorePlots[[x]] = plotB
+           }
+AllVlns[[d]] <- ggarrange(plotlist = StorePlots, widths=c(1.4, rep(1, length(Genes)-1)), ncol = max(PullLists$V1),  nrow = 1)  
+}
+pdf(paste(StudyName, "_", Filename, "_", HGDATE(), "_res", v, "_k", y, "_dim", z, "_AllMultiVlns.pdf", sep=""), width=max(PullLists$V1), height=length(unique(SeuFile@active.ident)))
+print(AllVlns)
+dev.off()
+
+#Cell No
+CellNo = as.data.frame(table(SeuFile@meta.data$seurat_clusters))
+write.csv(CellNo, paste(StudyName, "_", Filename, "_", HGDATE(),  "_counts_k", y, "_dim", z, "_res", v, ".csv", sep=""), row.names = F)
+}}
+
+#Feature Plots  
+FPList = list()  
+
+for(d in names(GeneLists)){
+Genes = GeneLists[[d]]
+
+FPSinglePage = list()
+FPSinglePage[[1]] = FeaturePlot(SeuFile, Genes[1], reduction="umap") + labs(title=paste(d, Genes[1]))
+for(p in seq(2, length(Genes), 1)){
+FPSinglePage[[p]] = FeaturePlot(SeuFile, Genes[p], reduction="umap") 
+}
+FPList[[d]] = ggarrange(plotlist = FPSinglePage, ncol=6, nrow=ceiling(max(PullLists$V1)/6))
+}
+
+pdf(paste(StudyName, "_", Filename, "_", HGDATE(),  "_dim", z, "_AllFPs.pdf", sep=""), width = 25, height = ceiling(max(PullLists$V1)/6)*4.5)
+print(FPList)
+dev.off()
+}}
+```
+
+
+
+#Run initial QC
+```{r}
+AE.QC.Data= list()
+QCViolins = list()
+QCHist = list()
+QCTable = as.data.frame(matrix(ncol=10, nrow=0))
+
+for(x in c("2022-OBESE_1", "2022-OBESE_2", "AE002", "2022-LEAN", "AE001")){
+AE.QC.Data[[x]] = Read10X(data.dir = paste("~/Desktop/Emiliano Lab scRNAseq/All/", x, "_cellranger_count_outs/filtered_feature_bc_matrix", sep=""))
+ScreeingFile = CreateSeuratObject(counts = AE.QC.Data[[x]], project = x, min.cells = 3, min.features = 0)
+AE.QC.Data[[x]] = ScreeingFile
+ScreeingFile[["percent.mt"]] <- PercentageFeatureSet(ScreeingFile, pattern = "^mt-", assay="RNA")
+QCViolins[[x]] = VlnPlot(ScreeingFile, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+TableData = as.data.frame(t(c(x, median(ScreeingFile$nFeature_RNA), mean(ScreeingFile$nFeature_RNA), sd(ScreeingFile$nFeature_RNA), median(ScreeingFile$nCount_RNA), mean(ScreeingFile$nCount_RNA), sd(ScreeingFile$nCount_RNA), median(ScreeingFile$percent.mt), mean(ScreeingFile$percent.mt), sd(ScreeingFile$percent.mt))))
+colnames(TableData) = c("Sample", "nFeature_Median", "nFeature_Mean", "nFeature_SD", "nCount_Median", "nCount_Mean", "nCount_SD", "percent.mt_Median", "percent.mt_Mean", "percent.mt_SD")
+QCTable = rbind(QCTable, TableData)
+QCHist[[x]] = ggplot(ScreeingFile@meta.data, aes(x=nFeature_RNA)) + 
+  geom_histogram(binwidth=30)+ ggtitle(x)+ scale_x_continuous(breaks = seq(0,max(ScreeingFile@meta.data$nFeature_RNA),200)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+}
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/All/AE_QC_Violins_", HGDATE(), ".pdf", sep=""), width=20, height=8)
+print(QCViolins)
+dev.off()
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/All/AE_QC_Histograms_", HGDATE(), ".pdf", sep=""), width=15, height=8)
+print(QCHist)
+dev.off()
+```
+
+
+##### OBESE ONLY ##### 
+```{r}
+setwd("~/Desktop/Emiliano Lab scRNAseq/Obese")
+
+AE.Data= list()
+for(x in c("2022-OBESE_1", "2022-OBESE_2", "AE002")){
+ScreeingFile = Read10X(data.dir = paste("~/Desktop/Emiliano Lab scRNAseq/All/", x, "_cellranger_count_outs/filtered_feature_bc_matrix", sep=""))
+ScreeingFile = CreateSeuratObject(counts = ScreeingFile, project = x, min.cells = 3, min.features = 0)
+Temp = as.data.frame(ScreeingFile@assays$RNA@counts)
+colnames(Temp) = paste0(x, colnames(Temp), sep="_")
+Temp = CreateSeuratObject(counts = Temp, project = x, min.cells = 3, min.features = 2000)
+Temp[["percent.mt"]] <- PercentageFeatureSet(Temp, pattern = "^mt-", assay="RNA")
+
+Temp <- NormalizeData(Temp)
+Temp <- FindVariableFeatures(Temp, do.plot = F, display.progress = F)
+
+Temp = ScaleData(Temp, vars.to.regress = c("nFeature_RNA", "percent.mt"), verbose = F)
+Temp = RunPCA(Temp, verbose = F, npcs = 20)
+Temp = RunUMAP(Temp, dims = 1:10, verbose = F)
+
+nExp_poi <- round(0.1*nrow(Temp@meta.data))
+Temp<- doubletFinder_v3(Temp, pN = 0.25, pK = 0.09, nExp = nExp_poi, PCs = 1:10)
+Temp.meta = Temp@meta.data
+Temp.meta2 = subset(Temp.meta, Temp.meta[[length(Temp.meta)]] == "Singlet" & Temp.meta$nFeature_RNA < 6000 & Temp.meta$percent.mt < 20)
+AE.Data[[x]] = subset(Temp, cells = row.names(Temp.meta2))
+}
+
+## INTEGRATE
+features <- SelectIntegrationFeatures(object.list = AE.Data)
+AE.anchors <- FindIntegrationAnchors(object.list = AE.Data, anchor.features = features)
+AE.combined <- IntegrateData(anchorset = AE.anchors)
+DefaultAssay(AE.combined) <- "integrated"
+
+PullObs1 = grep(row.names(AE.combined@meta.data), pattern = "^2022-OBESE_1", value = T)
+AE.combined@meta.data$orig.ident2 = ifelse(row.names(AE.combined@meta.data) %in% PullObs1, "OBS1", AE.combined@meta.data$orig.ident)
+AE.combined@meta.data$orig.ident2 = gsub("2022-OBESE", "OBS2", AE.combined@meta.data$orig.ident2)
+DefaultAssay(AE.combined) <- "RNA"
+MT.genes <- grep(pattern = "^mt-", x = rownames(x = AE.combined), value = TRUE)
+DefaultAssay(AE.combined) <- "integrated"
+percent.mt <- Matrix::colSums(AE.combined@assays[["RNA"]][MT.genes, ])/Matrix::colSums(AE.combined@assays[["RNA"]])
+AE.combined  = AddMetaData(AE.combined, percent.mt, "percent.mt")
+AE.combined <- ScaleData(AE.combined, vars.to.regress = "percent.mt")
+AE.combined <- RunPCA(AE.combined, npcs = 30, verbose = FALSE)
+AE.combined <- RunUMAP(AE.combined, reduction = "pca", dims = 1:30)
+save(list=c("AE.combined"), file = "~/Desktop/Emiliano Lab scRNAseq/Obese/AE_StdIntegration_DbltRm.RData")
+
+set.dim = 30
+set.res = 1
+set.kparam = c(30)
+ClusterFunc_All_RNA(AE.combined)
+
+## OPTIMIZE UMAP PARAMETERS
+DPlist2 = list()
+DPlist = list()
+FPlist = list()
+Filename = paste("AE.combined", HGDATE(), sep="_")
+for(y in seq(10,50,10)){
+DefaultAssay(AE.combined) = "integrated"
+AE.combined = RunPCA(AE.combined, npcs = y)
+for(z in seq(10,y,10)){
+for(s in c(2,5,10)){
+AE.combined <- RunUMAP(AE.combined, dims = 1:z, spread= s)
+DefaultAssay(AE.combined) = "RNA"
+
+FPlist[[paste("PCA", y, "_dims", z, "_spread", s)]] = FeaturePlot(AE.combined, c("Plp1", "Fabp7", "Dbi", "S100b", "Isl1", "Sox10", "Erbb3", "Slc47a1", "Lhx6", "Lmcd1", "Ifitm2", "Id1", "Rxrg", "Itga2", "Camk2n1", "Adamts5", "Rspo3", "Zeb2", "Penk", "Piezo1", "Tubb3", "Th", "Snap25", "Dcn", "Lum", "Col1a1", "Sox10", "Mag", "Ly6c1", "Ptprb", "Plvap", "C1qb", "Lyz2", "C1qa", "Cd68", "Alox5ap", "Ccl3", "Apobec1", "Cxcl2", "Rgs5", "Acta2", "Vtn", "Cldn1", "Kcnj13", "Cd79a", "Ly6d", "Trbc2", "Tent5c", "Isg20"), reduction="umap") 
+
+DPlist[[paste("PCA", y, "_dims", z, "_spread", s)]] = DimPlot(AE.combined, reduction="umap", split.by = "orig.ident2") + labs(title = paste("PCA", y, "_dims", z, "_spread", s))
+
+DPlist2[[paste("PCA", y, "_dims", z, "_spread", s)]] = DimPlot(AE.combined, reduction="umap", group.by = "orig.ident2", label=T) + labs(title = paste("PCA", y, "dims", z, "spread", s))
+}}}  
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/Obese/AES_", Filename, "_FeaturePlots.pdf", sep=""), width=20, height=40)
+print(FPlist)
+dev.off()
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/Obese/AES_", Filename, "_SPLITUMAP.pdf", sep=""), width=50, height=5)
+print(DPlist)
+dev.off()
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/Obese/AES_", Filename, "_GROUPUMAP.pdf", sep=""), width=8, height=5)
+print(DPlist2)
+dev.off()
+
+
+## CLUSTERING
+DefaultAssay(AE.combined) = "integrated"
+AE.combined <- RunPCA(AE.combined, npcs = 50, verbose = FALSE)
+AE.combined <- RunUMAP(AE.combined, reduction = "pca", dims = 1:30, spread=10)
+AE.combined_UMAP = as.data.frame(AE.combined@reductions$umap@cell.embeddings)
+
+set.dim = 30
+set.res = 1
+set.kparam = c(10,30,50)
+ClusterFunc_All_RNA(AE.combined)
+
+DefaultAssay(AE.combined) = "integrated"
+AE.combined <- FindNeighbors(AE.combined, k.param=10, dims=1:30)
+AE.combined <- FindClusters(AE.combined, resolution = 1)
+AE.combined.DEGs = DEGs(AE.combined)
+AE.combined.DEGs.subs = subset(AE.combined.DEGs, AE.combined.DEGs$avg_log2FC > 1 & AE.combined.DEGs$p_val_adj < 0.05 & AE.combined.DEGs$cluster == 12)
+Adipocytes = subset(AE.combined, idents = c(0, 1, 2, 4, 6, 8, 17, 10))
+Macrophages = subset(AE.combined, idents = c(9,15, 16)) #Includes some B cells
+Fibro_Neur_Endo = subset(AE.combined, idents = c(5, 12, 18)) #Fibro needs to be split into 3 clusters
+Glia_Schwann = subset(AE.combined, idents = c(7))
+vSMC = subset(AE.combined, idents = c(13))
+Tcells = subset(AE.combined, idents = c(14))
+Microglia = subset(AE.combined, idents = c(3, 11))
+ 
+set.dim = 30
+set.res = 1
+set.kparam = c(5)
+ClusterFunc_All_RNA(Macrophages)
+ClusterFunc_All_RNA(Fibroblasts)
+
+DefaultAssay(Macrophages) = "integrated"
+Macrophages <- FindNeighbors(Macrophages, k.param=5, dims=1:30)
+Macrophages <- FindClusters(Macrophages, resolution = 1)
+BCells = subset(Macrophages, idents = c(0))
+Macrophages_2 = subset(Macrophages, idents = c(0), invert=T)
+
+### CLEANING
+CheckInput = MoveAdipTovSMC
+CheckUMAP(AE.combined)
+
+MoveAdipToMacro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP)  %in% colnames(Adipocytes) & AE.combined_UMAP$UMAP_1 < -25 & AE.combined_UMAP$UMAP_2 > 0)
+MoveAdipToMicro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP)  %in% colnames(Adipocytes) & AE.combined_UMAP$UMAP_1 < -25 & AE.combined_UMAP$UMAP_2 < 0)
+MoveAdipToFibro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP)  %in% colnames(Adipocytes) & AE.combined_UMAP$UMAP_1 > -25 & AE.combined_UMAP$UMAP_1 < 0 & AE.combined_UMAP$UMAP_2 > 15)
+MoveAdipTovSMC = subset(AE.combined_UMAP, row.names(AE.combined_UMAP)  %in% colnames(Adipocytes) & AE.combined_UMAP$UMAP_1 < 0 & AE.combined_UMAP$UMAP_1 > -25 & AE.combined_UMAP$UMAP_2 < -25)
+Keep_Adip = subset(Adipocytes, cells = c(row.names(MoveAdipToMacro), row.names(MoveAdipToFibro), row.names(MoveAdipTovSMC)), invert=T)
+
+MoveMacroToMicro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Macrophages_2) & AE.combined_UMAP$UMAP_2 < -5)
+Keep_Macro = subset(Macrophages_2, cells = row.names(MoveMacroToMicro), invert=T)
+
+MoveMicroToMacro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Microglia) & AE.combined_UMAP$UMAP_2 > 0)
+Keep_Micro = subset(Microglia, cells = row.names(MoveMicroToMacro), invert=T)
+
+#MoveEndoToNeuro = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Endothelial) & AE.combined_UMAP$UMAP_2 > 0)
+#Keep_Endo = subset(Endothelial, cells = row.names(MoveEndoToNeuro), invert=T)
+
+Fibroblasts_ToSubset = subset(AE.combined, cells = c(colnames(Fibro_Neur_Endo), row.names(MoveAdipToFibro)))
+Fibroblasts_1 = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Fibroblasts_ToSubset) & AE.combined_UMAP$UMAP_2 > 30)
+Fibroblasts_2 = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Fibroblasts_ToSubset) & AE.combined_UMAP$UMAP_1 > 25)
+EndothelialCells = subset(AE.combined_UMAP, row.names(AE.combined_UMAP) %in% colnames(Fibroblasts_ToSubset) & AE.combined_UMAP$UMAP_1 > -20 & AE.combined_UMAP$UMAP_1 < -5 & AE.combined_UMAP$UMAP_2 < 15)
+Neurons = subset(Fibroblasts_ToSubset, cells = c(row.names(Fibroblasts_1), row.names(Fibroblasts_2), row.names(EndothelialCells)), invert=T)
+
+Obs.Macro = subset(AE.combined, cells = c(colnames(Keep_Macro), row.names(MoveMicroToMacro), row.names(MoveAdipToMacro)))
+Obs.Micro = subset(AE.combined, cells = c(colnames(Keep_Micro), row.names(MoveMacroToMicro), row.names(MoveAdipToMicro)))
+Obs.vSMC = subset(AE.combined, cells = c(colnames(vSMC), row.names(MoveAdipTovSMC)))
+
+
+
+
+## CONSOLIDATE META DATA
+ObeseMeta = GenerateMetaData(list("Adipocytes" = Keep_Adip, "Macrophages" = Obs.Macro, "Glia_Schwann" = Glia_Schwann, "vSMC" = Obs.vSMC, "T Cells" = Tcells, "Adipocytes" = Blood,  "Microglia" = Obs.Micro,  "Fibroblasts" = Fibroblasts_1, "Neurons_2" = Fibroblasts_2, "Neurons_1" = Neurons, "B Cells" = BCells, "Endothelial" = EndothelialCells))
+
+AE.combined = AddMetaData(AE.combined, ObeseMeta, "ObeseMeta")
+Idents(AE.combined) = "ObeseMeta"
+DimPlot(AE.combined)
+
+
+pdf("ObeseOnly_Ganglia_UMAP.pdf")
+print(DimPlot(AE.combined))
+dev.off()
+
+
+pdf("ObeseOnly_Ganglia_UMAP_Samples.pdf")
+print(DimPlot(AE.combined, group.by = "orig.ident2"))
+dev.off()
+
+
+DefaultAssay(AE.combined) = "RNA"
+AE.combined@meta.data$ObeseMeta = factor(AE.combined@meta.data$ObeseMeta, levels = rev(c("Adipocytes", "Neurons_1", "Neurons_2", "Glia_Schwann", "Microglia", "Macrophages", "vSMC", "Endothelial", "T Cells", "B Cells", "Fibroblasts")))
+Idents(AE.combined) = "ObeseMeta"
+
+pdf("ObeseOnly_Ganglia_DotPlot.pdf", width = 9)
+print(DotPlot(AE.combined, features = c("Ptprb", "Ecscr", "Penk", "Isl1", "Plp1", "Fabp7", "Dbi", "S100b", "Sox10", "Mag", "Apobec1", "Cxcl2", "Fcer1g", "Cd74", "Ctss", "Acta2", "Myh11", "Vtn", "Cldn1", "Kcnj13", "Cd3d", "Ms4a4b", "Ly6d", "Iglc2", "Dcn"), assay = "RNA") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) )
+dev.off()
+
+
+save(list=c("AE.combined"), file = "~/Desktop/Emiliano Lab scRNAseq/Obese/AE_StdIntegration_DbltRm.RData")
+
+```
+
+
+
+##### LEAN + OBESE ##### 
+```{r}
+setwd("~/Desktop/Emiliano Lab scRNAseq/All")
+
+AE.Data= list()
+for(x in c("2022-OBESE_1", "2022-OBESE_2", "AE002", "2022-LEAN", "AE001")){
+ScreeingFile = Read10X(data.dir = paste("~/Desktop/Emiliano Lab scRNAseq/All/", x, "_cellranger_count_outs/filtered_feature_bc_matrix", sep=""))
+ScreeingFile = CreateSeuratObject(counts = ScreeingFile, project = x, min.cells = 3, min.features = 0)
+Temp = as.data.frame(ScreeingFile@assays$RNA@counts)
+colnames(Temp) = paste0(x, colnames(Temp), sep="_")
+Temp = CreateSeuratObject(counts = Temp, project = x, min.cells = 3, min.features = 2000)
+Temp[["percent.mt"]] <- PercentageFeatureSet(Temp, pattern = "^mt-", assay="RNA")
+
+Temp <- NormalizeData(Temp)
+Temp <- FindVariableFeatures(Temp, do.plot = F, display.progress = F)
+
+Temp = ScaleData(Temp, vars.to.regress = c("nFeature_RNA", "percent.mt"), verbose = F)
+Temp = RunPCA(Temp, verbose = F, npcs = 20)
+Temp = RunUMAP(Temp, dims = 1:10, verbose = F)
+
+nExp_poi <- round(0.1*nrow(Temp@meta.data))
+Temp<- doubletFinder_v3(Temp, pN = 0.25, pK = 0.09, nExp = nExp_poi, PCs = 1:10)
+Temp.meta = Temp@meta.data
+Temp.meta2 = subset(Temp.meta, Temp.meta[[length(Temp.meta)]] == "Singlet" & Temp.meta$nFeature_RNA < 6000 & Temp.meta$percent.mt < 20)
+AE.Data[[x]] = subset(Temp, cells = row.names(Temp.meta2))
+}
+
+## INTEGRATE
+features <- SelectIntegrationFeatures(object.list = AE.Data)
+AE.anchors <- FindIntegrationAnchors(object.list = AE.Data, anchor.features = features)
+AE.LO.combined <- IntegrateData(anchorset = AE.anchors)
+DefaultAssay(AE.LO.combined) <- "integrated"
+
+PullObs1 = grep(row.names(AE.LO.combined@meta.data), pattern = "^2022-OBESE_1", value = T)
+AE.LO.combined@meta.data$orig.ident2 = ifelse(row.names(AE.LO.combined@meta.data) %in% PullObs1, "OBS1", AE.LO.combined@meta.data$orig.ident)
+AE.LO.combined@meta.data$orig.ident2 = gsub("2022-OBESE", "OBS2", AE.LO.combined@meta.data$orig.ident2)
+DefaultAssay(AE.LO.combined) <- "RNA"
+MT.genes <- grep(pattern = "^mt-", x = rownames(x = AE.LO.combined), value = TRUE)
+DefaultAssay(AE.LO.combined) <- "integrated"
+percent.mt <- Matrix::colSums(AE.LO.combined@assays[["RNA"]][MT.genes, ])/Matrix::colSums(AE.LO.combined@assays[["RNA"]])
+AE.LO.combined  = AddMetaData(AE.LO.combined, percent.mt, "percent.mt")
+AE.LO.combined <- ScaleData(AE.LO.combined, vars.to.regress = "percent.mt")
+AE.LO.combined <- RunPCA(AE.LO.combined, npcs = 30, verbose = FALSE)
+AE.LO.combined <- RunUMAP(AE.LO.combined, reduction = "pca", dims = 1:30)
+save(list=c("AE.LO.combined"), file = "~/Desktop/Emiliano Lab scRNAseq/All/AE_StdIntegration_DbltRm.RData")
+
+
+## OPTIMIZE UMAP PARAMETERS
+DPlist2 = list()
+DPlist = list()
+FPlist = list()
+Filename = paste("AE.LO.combined", HGDATE(), sep="_")
+for(y in seq(10,50,10)){
+DefaultAssay(AE.LO.combined) = "integrated"
+AE.LO.combined = RunPCA(AE.LO.combined, npcs = y)
+for(z in seq(10,y,10)){
+for(s in c(2,5,10)){
+AE.LO.combined <- RunUMAP(AE.LO.combined, dims = 1:z, spread= s)
+DefaultAssay(AE.LO.combined) = "RNA"
+
+FPlist[[paste("PCA", y, "_dims", z, "_spread", s)]] = FeaturePlot(AE.LO.combined, c("Plp1", "Fabp7", "Dbi", "S100b", "Isl1", "Sox10", "Erbb3", "Slc47a1", "Lhx6", "Lmcd1", "Ifitm2", "Id1", "Rxrg", "Itga2", "Camk2n1", "Adamts5", "Rspo3", "Zeb2", "Penk", "Piezo1", "Tubb3", "Th", "Snap25", "Dcn", "Lum", "Col1a1", "Sox10", "Mag", "Ly6c1", "Ptprb", "Plvap", "C1qb", "Lyz2", "C1qa", "Cd68", "Alox5ap", "Ccl3", "Apobec1", "Cxcl2", "Rgs5", "Acta2", "Vtn", "Cldn1", "Kcnj13", "Cd79a", "Ly6d", "Trbc2", "Tent5c", "Isg20"), reduction="umap") 
+
+DPlist[[paste("PCA", y, "_dims", z, "_spread", s)]] = DimPlot(AE.LO.combined, reduction="umap", split.by = "orig.ident2") + labs(title = paste("PCA", y, "_dims", z, "_spread", s))
+
+DPlist2[[paste("PCA", y, "_dims", z, "_spread", s)]] = DimPlot(AE.LO.combined, reduction="umap", group.by = "orig.ident2", label=T) + labs(title = paste("PCA", y, "dims", z, "spread", s))
+}}}  
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/All/AES_", Filename, "_FeaturePlots.pdf", sep=""), width=20, height=40)
+print(FPlist)
+dev.off()
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/All/AES_", Filename, "_SPLITUMAP.pdf", sep=""), width=50, height=5)
+print(DPlist)
+dev.off()
+
+pdf(paste("~/Desktop/Emiliano Lab scRNAseq/All/AES_", Filename, "_GROUPUMAP.pdf", sep=""), width=8, height=5)
+print(DPlist2)
+dev.off()
+
+
+## CLUSTERING
+DefaultAssay(AE.LO.combined) = "integrated"
+AE.LO.combined <- RunPCA(AE.LO.combined, npcs = 20, verbose = FALSE)
+AE.LO.combined <- RunUMAP(AE.LO.combined, reduction = "pca", dims = 1:10, spread=5)
+AE.LO.combined_UMAP = as.data.frame(AE.LO.combined@reductions$umap@cell.embeddings)
+
+set.dim = 20
+set.res = 1
+set.kparam = c(20)
+ClusterFunc_All_RNA(AE.LO.combined)
+
+DefaultAssay(AE.LO.combined) = "integrated"
+AE.LO.combined <- FindNeighbors(AE.LO.combined, k.param=20, dims=1:20)
+AE.LO.combined <- FindClusters(AE.LO.combined, resolution = 1)
+LO.Neurons = subset(AE.LO.combined, idents = c(5,10))
+LO.Macrophages = subset(AE.LO.combined, idents = c(8)) 
+LO.Glia_Schwann = subset(AE.LO.combined, idents = c(3,9,14))
+LO.vSMC = subset(AE.LO.combined, idents = c(12))
+LO.TBcells = subset(AE.LO.combined, idents = c(11))
+LO.Microglia = subset(AE.LO.combined, idents = c(2))
+LO.Endothelial = subset(AE.LO.combined, idents = c(13))
+LO.Adipocytes = subset(AE.LO.combined, idents = c(6,7,15,0,1,4))
+
+### CLEANING
+CheckInput = LO.Adipocytes.Clean
+CheckUMAP(AE.LO.combined)
+
+MoveMacroToTB = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Macrophages) & AE.LO.combined_UMAP$UMAP_2 < -18)
+KeepMacro = subset(LO.Macrophages, cells = row.names(MoveMacroToTB), invert=T)
+
+MoveGliaToNeur = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Glia_Schwann) & AE.LO.combined_UMAP$UMAP_2 > 20  & AE.LO.combined_UMAP$UMAP_1 < 10)
+MoveGliaToAdip = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Glia_Schwann) & AE.LO.combined_UMAP$UMAP_1 > 5 & AE.LO.combined_UMAP$UMAP_2 < 0)
+MoveGliaTovSMC = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Glia_Schwann) & AE.LO.combined_UMAP$UMAP_1 > 10 & AE.LO.combined_UMAP$UMAP_2 > 0)
+KeepGlia = subset(LO.Glia_Schwann, cells = c(row.names(MoveGliaToAdip), row.names(MoveGliaToNeur), row.names(MoveGliaTovSMC)), invert=T)
+
+MovevSMCToNeur = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.vSMC) & AE.LO.combined_UMAP$UMAP_1 < 10)
+KeepvSMC = subset(LO.vSMC, cells = row.names(MovevSMCToNeur), invert=T)
+
+MoveTBToMacro = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.TBcells) & AE.LO.combined_UMAP$UMAP_1 > -25)
+KeepTB = subset(LO.TBcells, cells = row.names(MoveTBToMacro), invert=T)
+
+MoveMicroToMacro = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Microglia) & AE.LO.combined_UMAP$UMAP_2 < -2)
+KeepMicro = subset(LO.Microglia, cells = row.names(MoveMicroToMacro), invert=T)
+
+MoveEndoToNeur = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Endothelial) &  AE.LO.combined_UMAP$UMAP_2 > 20)
+MoveEndoToAdip = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Endothelial) & AE.LO.combined_UMAP$UMAP_1 > 5)
+KeepEndo = subset(LO.Endothelial, cells = c(row.names(MoveEndoToNeur), row.names(MoveEndoToAdip)), invert=T)
+
+MoveAdipToNeur = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Adipocytes) & AE.LO.combined_UMAP$UMAP_2 > 20)
+MoveAdipToMicro = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Adipocytes) & AE.LO.combined_UMAP$UMAP_1 < -20 & AE.LO.combined_UMAP$UMAP_2 > 0)
+MoveAdipToMacro = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Adipocytes) & AE.LO.combined_UMAP$UMAP_1 < -20 & AE.LO.combined_UMAP$UMAP_2 < 0)
+MoveAdipToGlial = subset(AE.LO.combined_UMAP, row.names(AE.LO.combined_UMAP)  %in% colnames(LO.Adipocytes) & AE.LO.combined_UMAP$UMAP_1 < 5 & AE.LO.combined_UMAP$UMAP_1 > -15 & AE.LO.combined_UMAP$UMAP_2 < -15)
+KeepAdip = subset(LO.Adipocytes, cells = c(row.names(MoveAdipToNeur), row.names(MoveAdipToMicro), row.names(MoveAdipToMacro), row.names(MoveAdipToGlial)), invert=T)
+
+LO.Neurons.Clean = subset(AE.LO.combined, cells = c(colnames(LO.Neurons), row.names(MoveGliaToNeur), row.names(MovevSMCToNeur), row.names(MoveEndoToNeur), row.names(MoveAdipToNeur)))
+LO.Macrophages.Clean = subset(AE.LO.combined, cells = c(colnames(KeepMacro), row.names(MoveTBToMacro), row.names(MoveMicroToMacro), row.names(MoveAdipToMacro))) 
+LO.Glia_Schwann.Clean = subset(AE.LO.combined, cells = c(colnames(KeepGlia), row.names(MoveAdipToGlial)))
+LO.vSMC.Clean = subset(AE.LO.combined, cells = c(colnames(KeepvSMC), row.names(MoveGliaTovSMC)))
+LO.TBcells = subset(AE.LO.combined, cells = c(colnames(KeepTB), row.names(MoveMacroToTB)))
+LO.Microglia.Clean = subset(AE.LO.combined, cells = c(colnames(KeepMicro), row.names(MoveAdipToMicro)))
+LO.Adipocytes.Clean = subset(AE.LO.combined, cells = unique(c(colnames(KeepAdip), row.names(MoveEndoToAdip), row.names(MoveGliaToAdip))))
+
+CheckInput = MoveEndoToAdip
+CheckUMAP(AE.LO.combined)
+
+
+set.dim = 20
+set.res = 1
+set.kparam = c(5)
+ClusterFunc_All_RNA(LO.TBcellsv)
+
+DefaultAssay(LO.TBcells) = "integrated"
+LO.TBcells <- FindNeighbors(LO.TBcells, k.param=5, dims=1:20)
+LO.TBcells <- FindClusters(LO.TBcells, resolution = 1)
+LO.TCells = subset(LO.TBcells, idents = c(0,4))
+LO.BCells = subset(LO.TBcells, idents = c(0,4), invert=T)
+
+## CONSOLIDATE META DATA
+LO.Meta = GenerateMetaData(list("Neurons" = LO.Neurons.Clean, "Macrophages" = LO.Macrophages.Clean, "Glia_Schwann" = LO.Glia_Schwann.Clean, "vSMC" = LO.vSMC.Clean,  "T Cells" = LO.TCells, "Endothelial" = KeepEndo, "Microglia" = LO.Microglia.Clean,  "B Cells" = LO.BCells, "Adipocytes" = KeepAdip, "Adipocytes" = MoveEndoToAdip, "Adipocytes" = MoveGliaToAdip))
+
+AE.LO.combined = AddMetaData(AE.LO.combined, LO.Meta, "LO.Meta")
+Idents(AE.LO.combined) = "LO.Meta"
+DimPlot(AE.LO.combined)
+
+pdf("Lean_Obese_Ganglia_UMAP.pdf")
+print(DimPlot(AE.LO.combined))
+dev.off()
+
+AE.LO.combined@meta.data$sample = ifelse(AE.LO.combined@meta.data$orig.ident2 %in% c("2022-LEAN", "AE001"), "Lean", "Obese")
+
+pdf("Lean_Obese_Ganglia_UMAP_Samples.pdf")
+print(DimPlot(AE.LO.combined, group.by = "orig.ident2"))
+dev.off()
+
+pdf("Lean_Obese_Ganglia_UMAP_SampleRed.pdf")
+print(DimPlot(AE.LO.combined, group.by = "sample"))
+dev.off()
+
+DefaultAssay(AE.LO.combined) = "RNA"
+AE.LO.combined@meta.data$LO.Meta = factor(AE.LO.combined@meta.data$LO.Meta, levels = rev(c("Adipocytes", "Neurons", "Glia_Schwann", "Microglia", "Macrophages", "vSMC", "Endothelial", "T Cells", "B Cells")))
+Idents(AE.LO.combined) = "LO.Meta"
+
+pdf("Lean_Obese_Ganglia_DotPlot.pdf", width = 8)
+print(DotPlot(AE.LO.combined, features = c("Ptprb", "Ecscr", "Penk", "Isl1", "Plp1", "Fabp7", "Dbi", "S100b", "Sox10", "Mag", "Apobec1", "Cxcl2", "Fcer1g", "Cd74", "Ctss", "Acta2", "Myh11", "Vtn", "Cldn1", "Kcnj13", "Cd3d", "Ms4a4b", "Ly6d", "Iglc2" ), assay = "RNA") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) )
+dev.off()
+
+
+AE.LO.combined.meta = AE.LO.combined@meta.data %>% dplyr::select("sample", "LO.Meta")
+AE.LO.combined.meta$Count = 1
+
+SampleN = as.data.frame(table(AE.LO.combined.meta$sample))
+CompilePercents = as.data.frame(matrix(ncol =6, nrow=0))
+colnames(CompilePercents) = c("Timepoint", "N_Pop", "N_All", "Percent_Sample", "Percent_SamplePop", "Sample")
+
+for(x in unique(AE.LO.combined.meta$LO.Meta)){
+Pull_Spec = subset(AE.LO.combined.meta, AE.LO.combined.meta$LO.Meta %in% x)  
+ReduceSpec = as.data.frame(table(Pull_Spec$sample))
+ReduceSpec_merge = merge(ReduceSpec, SampleN, by = "Var1", all = T)
+ReduceSpec_merge[is.na(ReduceSpec_merge)] <- 0
+ReduceSpec_merge$Percent = ReduceSpec_merge$Freq.x / ReduceSpec_merge$Freq.y
+ReduceSpec_merge$Percent2 = ReduceSpec_merge$Percent/sum(ReduceSpec_merge$Percent)*100
+colnames(ReduceSpec_merge) = c("Timepoint", "N_Pop", "N_All", "Percent_Sample", "Percent_SamplePop")
+ReduceSpec_merge$Sample = x
+CompilePercents = rbind(CompilePercents, ReduceSpec_merge)
+}
+CompilePercents$Sample = factor(CompilePercents$Sample, levels = c("Adipocytes", "Neurons", "Glia_Schwann", "Microglia", "Macrophages", "vSMC", "Endothelial", "T Cells", "B Cells"))
+
+SP = ggplot(CompilePercents, aes(fill=Timepoint, y=Percent_SamplePop, x=Sample))+ theme_classic() +
+      geom_bar(position="stack", stat="identity") +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("% cells") + xlab("")+ scale_y_continuous(expand= c(0,0))
+
+pdf("Lean_Obese_Ganglia_BarPlot.pdf")
+print(SP)
+dev.off()
+save(list=c("AE.LO.combined"), file = "~/Desktop/Emiliano Lab scRNAseq/All/AE_StdIntegration_DbltRm.RData")
+
+```
+
+
